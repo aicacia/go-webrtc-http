@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/aicacia/go-cmap"
+	rao "github.com/aicacia/go-result-and-option"
 	webrtc "github.com/pion/webrtc/v4"
 )
 
@@ -19,7 +20,7 @@ type webrtcClientConnectionST struct {
 	readHeaders       bool
 	writer            io.WriteCloser
 	response          *http.Response
-	ch                chan *http.Response
+	ch                chan rao.Result[*http.Response]
 }
 
 func createWebRTCClientConnection(connectionId uint32, request *http.Request) *webrtcClientConnectionST {
@@ -39,7 +40,7 @@ func createWebRTCClientConnection(connectionId uint32, request *http.Request) *w
 			ContentLength: 0,
 			Header:        http.Header{},
 		},
-		ch: make(chan *http.Response, 1),
+		ch: make(chan rao.Result[*http.Response], 1),
 	}
 }
 
@@ -74,7 +75,7 @@ func NewRoundTripper(channel *webrtc.DataChannel) *WebRTCRoundTripperST {
 			} else if !connection.readHeaders {
 				if line[0] == r && line[1] == n {
 					connection.readHeaders = true
-					connection.ch <- connection.response
+					connection.ch <- rao.Ok(connection.response)
 					close(connection.ch)
 				} else {
 					header := reHeader.Split(string(line), 2)
@@ -109,12 +110,25 @@ func NewRoundTripper(channel *webrtc.DataChannel) *WebRTCRoundTripperST {
 }
 
 func (rt *WebRTCRoundTripperST) RoundTrip(request *http.Request) (*http.Response, error) {
+	ctx := request.Context()
 	connection := rt.createConnection(request)
 	err := rt.writeRequest(connection, request)
 	if err != nil {
 		return nil, err
 	}
-	return <-connection.ch, nil
+	select {
+	case <-ctx.Done():
+		rt.deleteConnection(connection.connectionId)
+		return nil, ctx.Err()
+	case result := <-connection.ch:
+		if response, ok := result.Ok(); ok {
+			return response, nil
+		} else if err, ok := result.Err(); ok {
+			return nil, err
+		} else {
+			return nil, fmt.Errorf("unknown error")
+		}
+	}
 }
 
 func (rt *WebRTCRoundTripperST) createConnection(request *http.Request) *webrtcClientConnectionST {
@@ -170,7 +184,6 @@ func (rt *WebRTCRoundTripperST) writeRequest(connection *webrtcClientConnectionS
 		// save room for id
 		maxMessageSize -= 4
 		buf := make([]byte, maxMessageSize)
-		log.Printf("maxMessageSize: %d\n", maxMessageSize)
 		for {
 			n, err := request.Body.Read(buf)
 			if err != nil {
