@@ -38,6 +38,7 @@ func createWebRTCClientConnection(connectionId uint32, request *http.Request) *w
 			Request:       request,
 			Body:          pr,
 			ContentLength: 0,
+			Uncompressed:  true,
 			Header:        http.Header{},
 		},
 		ch: make(chan rao.Result[*http.Response], 1),

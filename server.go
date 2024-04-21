@@ -24,7 +24,7 @@ type webrtcServerConnectionST struct {
 }
 
 func createWebRTCServerConnection(method, path, version string) (*webrtcServerConnectionST, error) {
-	url, err := url.Parse("webrtc-http://" + path)
+	url, err := url.Parse("webrtc-http:" + path)
 	if err != nil {
 		return nil, err
 	}
