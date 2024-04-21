@@ -1,11 +1,44 @@
 package webrtc_http
 
+import (
+	"fmt"
+	"math"
+	"math/rand"
+	"strconv"
+	"strings"
+)
+
 func encodeLine(requestIdBytes []byte, line string) []byte {
 	return append(requestIdBytes, []byte(line)...)
 }
 
 func encodeLineBytes(requestIdBytes []byte, line []byte) []byte {
 	return append(requestIdBytes, line...)
+}
+
+func randUint32() uint32 {
+	return uint32(rand.Int31n(math.MaxInt32))
+}
+
+func parseVersion(version string) (string, int, int, error) {
+	versionParts := strings.SplitN(version, "/", 2)
+	if len(versionParts) != 2 {
+		return "", 0, 0, fmt.Errorf("invalid version %s", version)
+	}
+	protocal := versionParts[0]
+	majorMinorParts := strings.SplitN(versionParts[1], ".", 2)
+	if len(majorMinorParts) != 2 {
+		return "", 0, 0, fmt.Errorf("invalid version %s", version)
+	}
+	major, err := strconv.Atoi(majorMinorParts[0])
+	if err != nil {
+		return "", 0, 0, err
+	}
+	minor, err := strconv.Atoi(majorMinorParts[1])
+	if err != nil {
+		return "", 0, 0, err
+	}
+	return protocal, major, minor, nil
 }
 
 func statusCodeToStatusText(statusCode int) string {

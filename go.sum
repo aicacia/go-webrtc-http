@@ -1,3 +1,5 @@
+github.com/aicacia/go-cmap v0.0.0-20240420172349-4aaf998b89ef h1:yEX1dSZ62zH3i6TKJha7ovxfzJeZrhcGb9JIzMP9I7U=
+github.com/aicacia/go-cmap v0.0.0-20240420172349-4aaf998b89ef/go.mod h1:DXw1OhI6eBt8Q2XWKkcq4BFFb7F0uJaeL+ZviMQIXNE=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
