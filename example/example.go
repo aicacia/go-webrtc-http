@@ -9,10 +9,17 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 
 	webrtcHttp "github.com/aicacia/go-webrtc-http"
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v4"
+)
+
+var (
+	TOKEN       string
+	P2P_API_URL string
+	P2P_WS_URL  string
 )
 
 var config webrtc.Configuration = webrtc.Configuration{
@@ -24,11 +31,14 @@ var config webrtc.Configuration = webrtc.Configuration{
 }
 
 func InitClient() {
-	token, err := authenticate("client", "http://localhost:4000", "test")
+	P2P_API_URL = os.Getenv("P2P_API_URL")
+	P2P_WS_URL = os.Getenv("P2P_WS_URL")
+
+	token, err := authenticate("client", "test")
 	if err != nil {
 		log.Fatal(err)
 	}
-	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://localhost:4000/client/websocket?token=%s", url.QueryEscape(token)), nil)
+	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf(P2P_WS_URL+"/client/websocket?token=%s", url.QueryEscape(token)), nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -119,8 +129,10 @@ Loop:
 			}
 		}
 	}
-	http.DefaultTransport = webrtcHttp.NewRoundTripper(channel)
-	resp, err := http.Post("/test", "text/plain", bytes.NewBufferString("Hello, world!"))
+	client := &http.Client{
+		Transport: webrtcHttp.NewRoundTripper(channel),
+	}
+	resp, err := client.Post("/test", "text/plain", bytes.NewBufferString("Hello, world!"))
 	if err != nil {
 		log.Fatalf("error in http call: %v", err)
 	}
@@ -137,11 +149,15 @@ Loop:
 }
 
 func InitServer() {
-	token, err := authenticate("server", "http://localhost:4000", "test")
+	TOKEN = os.Getenv("JWT_TOKEN")
+	P2P_API_URL = os.Getenv("P2P_API_URL")
+	P2P_WS_URL = os.Getenv("P2P_WS_URL")
+
+	token, err := authenticate("server", "test")
 	if err != nil {
 		log.Fatal(err)
 	}
-	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://localhost:4000/server/websocket?token=%s", url.QueryEscape(token)), nil)
+	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf(P2P_WS_URL+"/server/websocket?token=%s", url.QueryEscape(token)), nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -154,7 +170,7 @@ func InitServer() {
 		err := conn.ReadJSON(&msg)
 		if err != nil {
 			log.Println(err)
-			token, err := authenticate("server", "http://localhost:4000", "test")
+			token, err := authenticate("server", "test")
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -264,16 +280,28 @@ func createJSONReader[T any](c *websocket.Conn) chan T {
 	return out
 }
 
-func authenticate(kind string, url, secret string) (string, error) {
-	requestBody, err := json.Marshal(map[string]string{
-		"id":       "webrtc-example",
+func authenticate(kind string, secret string) (string, error) {
+	requestBody := map[string]string{
 		"password": secret,
-	})
+	}
+	if kind == "client" {
+		requestBody["id"] = "webrtc-example"
+	}
+
+	requestBodyBytes, err := json.Marshal(requestBody)
 	if err != nil {
 		return "", err
 	}
 
-	resp, err := http.Post(url+"/"+kind, "application/json", bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest("POST", P2P_API_URL+"/"+kind, bytes.NewBuffer(requestBodyBytes))
+	if err != nil {
+		return "", err
+	}
+	if kind == "server" {
+		req.Header.Set("Authorization", "Bearer "+TOKEN)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
