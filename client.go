@@ -1,4 +1,4 @@
-package webrtc_http
+package webrtchttp
 
 import (
 	"encoding/binary"
