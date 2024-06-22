@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
 
+	"github.com/aicacia/go-simplepeer"
 	webrtcHttp "github.com/aicacia/go-webrtc-http"
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v4"
@@ -42,95 +44,50 @@ func InitClient() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer conn.Close()
 	log.Printf("connecting to server")
-	ready := make(chan bool, 1)
-	peerConnection, err := webrtc.NewPeerConnection(config)
-	if err != nil {
-		log.Fatal(err)
-	}
-	peerConnection.OnConnectionStateChange(func(pcs webrtc.PeerConnectionState) {
-		if pcs == webrtc.PeerConnectionStateClosed {
-			peerConnection.Close()
-			peerConnection = nil
-		}
+
+	peerConnect := make(chan struct{}, 1)
+	peerClose := make(chan struct{}, 1)
+	peer := simplepeer.NewPeer(simplepeer.PeerOptions{
+		Config: &config,
+		OnSignal: func(message simplepeer.SignalMessage) error {
+			return conn.WriteJSON(message)
+		},
+		OnConnect: func() {
+			peerConnect <- struct{}{}
+		},
+		OnClose: func() {
+			peerClose <- struct{}{}
+		},
 	})
-	pendingCandidates := make([]*webrtc.ICECandidate, 0)
-	peerConnection.OnICECandidate(func(pendingCandidate *webrtc.ICECandidate) {
-		if pendingCandidate == nil {
-			return
-		}
-		remoteDescription := peerConnection.RemoteDescription()
-		if remoteDescription == nil {
-			pendingCandidates = append(pendingCandidates, pendingCandidate)
-		} else {
-			err := conn.WriteJSON(map[string]interface{}{
-				"type":      "candidate",
-				"candidate": pendingCandidate.ToJSON().Candidate,
-			})
-			if err != nil {
-				log.Fatal(err)
-			}
-		}
-	})
-	channel, err := peerConnection.CreateDataChannel("webrtc-http-data-channel", nil)
+	err = peer.Init()
 	if err != nil {
-		log.Fatal(err)
-	}
-	channel.OnOpen(func() {
-		ready <- true
-	})
-	offer, err := peerConnection.CreateOffer(nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if err = peerConnection.SetLocalDescription(offer); err != nil {
-		log.Fatal(err)
-	}
-	err = conn.WriteJSON(offer)
-	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
 	reader := createJSONReader[map[string]interface{}](conn)
-Loop:
+ReadLoop:
 	for {
 		select {
-		case <-ready:
-			break Loop
+		case <-peerConnect:
+			break ReadLoop
+		case <-peerClose:
+			log.Fatal("connection closed")
+			break ReadLoop
 		case msg, ok := <-reader:
 			if !ok {
 				log.Fatal("connection closed")
 				break
 			}
-			if peerConnection != nil {
-				if kind, ok := msg["type"].(string); ok {
-					switch kind {
-					case "answer":
-						log.Printf("received answer")
-						err := peerConnection.SetRemoteDescription(webrtc.SessionDescription{
-							Type: webrtc.SDPTypeAnswer,
-							SDP:  msg["sdp"].(string),
-						})
-						if err != nil {
-							log.Fatal(err)
-						}
-						for _, pendingCandidate := range pendingCandidates {
-							err := conn.WriteJSON(map[string]interface{}{
-								"type": "candidate",
-								"candidate": map[string]interface{}{
-									"candidate": pendingCandidate.ToJSON().Candidate,
-								},
-							})
-							if err != nil {
-								log.Fatal(err)
-							}
-						}
-					}
-				}
+			err := peer.Signal(msg)
+			if err != nil {
+				log.Fatal(err)
 			}
 		}
 	}
+
 	client := &http.Client{
-		Transport: webrtcHttp.NewRoundTripper(channel),
+		Transport: webrtcHttp.NewRoundTripper(peer.Channel()),
 	}
 	resp, err := client.Post("/test", "text/plain", bytes.NewBufferString("Hello, world!"))
 	if err != nil {
@@ -157,24 +114,26 @@ func InitServer() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	var connRW sync.RWMutex
 	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf(P2P_WS_URL+"/server/websocket?token=%s", url.QueryEscape(token)), nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	peerConnections := make(map[string]*webrtc.PeerConnection)
-	channels := make(map[string]*webrtc.DataChannel)
+	peers := make(map[string]*simplepeer.Peer)
 	servers := make(map[string]*webrtcHttp.WebRTCServerST)
 	log.Printf("listening for peers")
 	for {
 		var msg map[string]interface{}
+		connRW.RLock()
 		err := conn.ReadJSON(&msg)
+		connRW.RUnlock()
 		if err != nil {
 			log.Println(err)
 			token, err := authenticate("server", "test")
 			if err != nil {
 				log.Fatal(err)
 			}
-			conn, _, err = websocket.DefaultDialer.Dial(fmt.Sprintf("ws://localhost:4000/server/websocket?token=%s", url.QueryEscape(token)), nil)
+			conn, _, err = websocket.DefaultDialer.Dial(fmt.Sprintf(P2P_WS_URL+"/server/websocket?token=%s", url.QueryEscape(token)), nil)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -182,19 +141,21 @@ func InitServer() {
 		}
 		switch msg["type"].(string) {
 		case "join":
-			log.Printf("%s: join", msg["from"])
-			peerConnection, err := webrtc.NewPeerConnection(config)
-			if err != nil {
-				log.Fatal(err)
-			}
 			from := msg["from"].(string)
-			peerConnections[from] = peerConnection
-			peerConnection.OnDataChannel(func(channel *webrtc.DataChannel) {
-				log.Printf("New DataChannel %s %d\n", channel.Label(), channel.ID())
-
-				channel.OnOpen(func() {
-					channels[from] = channel
-					servers[from] = webrtcHttp.NewServer(channel, func(w http.ResponseWriter, r *http.Request) {
+			log.Printf("%s: join", from)
+			var peer *simplepeer.Peer
+			peer = simplepeer.NewPeer(simplepeer.PeerOptions{
+				Config: &config,
+				OnSignal: func(message simplepeer.SignalMessage) error {
+					connRW.Lock()
+					defer connRW.Unlock()
+					return conn.WriteJSON(map[string]interface{}{
+						"to":      from,
+						"payload": message,
+					})
+				},
+				OnConnect: func() {
+					servers[from] = webrtcHttp.NewServer(peer.Channel(), func(w http.ResponseWriter, r *http.Request) {
 						for key, values := range r.Header {
 							for _, value := range values {
 								w.Header().Add(key, value)
@@ -205,61 +166,27 @@ func InitServer() {
 							fmt.Println(err)
 						}
 					})
-				})
-			})
-			peerConnection.OnConnectionStateChange(func(pcs webrtc.PeerConnectionState) {
-				if pcs == webrtc.PeerConnectionStateClosed {
-					peerConnection.Close()
-					delete(peerConnections, from)
-					delete(channels, from)
+				},
+				OnClose: func() {
+					delete(peers, from)
 					delete(servers, from)
-				}
+				},
 			})
+			peers[from] = peer
 		case "leave":
 			log.Printf("%s: left", msg["from"])
 		case "message":
-			if peerConnection, ok := peerConnections[msg["from"].(string)]; ok {
-				if kind, ok := msg["payload"].(map[string]interface{})["type"].(string); ok {
-					switch kind {
-					case "offer":
-						log.Printf("received offer from %s", msg["from"])
-						err := peerConnection.SetRemoteDescription(webrtc.SessionDescription{
-							Type: webrtc.SDPTypeOffer,
-							SDP:  msg["payload"].(map[string]interface{})["sdp"].(string),
-						})
-						if err != nil {
-							log.Fatal(err)
-						}
-						answer, err := peerConnection.CreateAnswer(nil)
-						if err != nil {
-							log.Fatal(err)
-						}
-						gatherComplete := webrtc.GatheringCompletePromise(peerConnection)
-						err = peerConnection.SetLocalDescription(answer)
-						if err != nil {
-							log.Fatal(err)
-						}
-						<-gatherComplete
-
-						peerAnswer := peerConnection.LocalDescription()
-						err = conn.WriteJSON(map[string]interface{}{
-							"to":      msg["from"],
-							"payload": peerAnswer,
-						})
-						if err != nil {
-							log.Fatal(err)
-						}
-					case "candidate":
-						log.Printf("received candidate from %s", msg["from"])
-						candidate, ok := msg["payload"].(map[string]interface{})["candidate"].(map[string]interface{})["candidate"].(string)
-						if !ok {
-							log.Fatal("invalid candidate")
-						}
-						if err := peerConnection.AddICECandidate(webrtc.ICECandidateInit{Candidate: candidate}); err != nil {
-							log.Fatal(err)
-						}
+			if peer, ok := peers[msg["from"].(string)]; ok {
+				if payload, ok := msg["payload"].(map[string]interface{}); ok {
+					err := peer.Signal(payload)
+					if err != nil {
+						log.Println(err)
 					}
+				} else {
+					log.Printf("%s: invalid payload", msg["from"])
 				}
+			} else {
+				log.Printf("%s: peer not found", msg["from"])
 			}
 		}
 	}
