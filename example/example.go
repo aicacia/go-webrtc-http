@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	TOKEN       string
+	JWT_TOKEN   string
 	P2P_API_URL string
 	P2P_WS_URL  string
 )
@@ -36,11 +36,17 @@ func InitClient() {
 	P2P_API_URL = os.Getenv("P2P_API_URL")
 	P2P_WS_URL = os.Getenv("P2P_WS_URL")
 
-	token, err := authenticate("client", "test")
+	token, err := authenticate("client")
 	if err != nil {
 		log.Fatal(err)
 	}
-	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf(P2P_WS_URL+"/client/websocket?token=%s", url.QueryEscape(token)), nil)
+	payloadBytes, err := json.Marshal(map[string]interface{}{
+		"name": "test",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf(P2P_WS_URL+"/client/websocket?token=%s&payload=%s", url.QueryEscape(token), url.QueryEscape(string(payloadBytes))), nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -51,7 +57,7 @@ func InitClient() {
 	peerClose := make(chan struct{}, 1)
 	peer := simplepeer.NewPeer(simplepeer.PeerOptions{
 		Config: &config,
-		OnSignal: func(message simplepeer.SignalMessage) error {
+		OnSignal: func(message map[string]interface{}) error {
 			return conn.WriteJSON(message)
 		},
 		OnConnect: func() {
@@ -103,14 +109,18 @@ ReadLoop:
 		}
 	}
 	log.Printf("response: %s", string(bytes))
+	err = peer.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func InitServer() {
-	TOKEN = os.Getenv("JWT_TOKEN")
+	JWT_TOKEN = os.Getenv("JWT_TOKEN")
 	P2P_API_URL = os.Getenv("P2P_API_URL")
 	P2P_WS_URL = os.Getenv("P2P_WS_URL")
 
-	token, err := authenticate("server", "test")
+	token, err := authenticate("server")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -129,7 +139,7 @@ func InitServer() {
 		connRW.RUnlock()
 		if err != nil {
 			log.Println(err)
-			token, err := authenticate("server", "test")
+			token, err := authenticate("server")
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -142,11 +152,11 @@ func InitServer() {
 		switch msg["type"].(string) {
 		case "join":
 			from := msg["from"].(string)
-			log.Printf("%s: join", from)
+			log.Printf("%s: join %v", from, msg["payload"])
 			var peer *simplepeer.Peer
 			peer = simplepeer.NewPeer(simplepeer.PeerOptions{
 				Config: &config,
-				OnSignal: func(message simplepeer.SignalMessage) error {
+				OnSignal: func(message map[string]interface{}) error {
 					connRW.Lock()
 					defer connRW.Unlock()
 					return conn.WriteJSON(map[string]interface{}{
@@ -207,12 +217,12 @@ func createJSONReader[T any](c *websocket.Conn) chan T {
 	return out
 }
 
-func authenticate(kind string, secret string) (string, error) {
+func authenticate(kind string) (string, error) {
 	requestBody := map[string]string{
-		"password": secret,
+		"password": "password",
 	}
 	if kind == "client" {
-		requestBody["id"] = "webrtc-example"
+		requestBody["id"] = "some-globally-unique-id"
 	}
 
 	requestBodyBytes, err := json.Marshal(requestBody)
@@ -225,7 +235,7 @@ func authenticate(kind string, secret string) (string, error) {
 		return "", err
 	}
 	if kind == "server" {
-		req.Header.Set("Authorization", "Bearer "+TOKEN)
+		req.Header.Set("Authorization", "Bearer "+JWT_TOKEN)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)

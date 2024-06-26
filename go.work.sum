@@ -1,3 +1,5 @@
+github.com/aicacia/go-atomic-value v0.0.0-20240622130239-0836551b1902 h1:AfUrk34miB8iEPqRA0uG1aCsVveUUiu11N/mgzraxzs=
+github.com/aicacia/go-cslice v0.0.0-20240622125649-9914a113bdf2 h1:0iJFoudGCwrU7zUZKM0b8S+bnnbx0h9YvuHKbIfKn+0=
 github.com/aicacia/go-result-and-option v0.0.0-20231005120116-a72cc9cee3d4/go.mod h1:YdQYcAxqFZ4fRnYWqGEvG5J+AT0Cba1oPDtunZOSazs=
 github.com/aicacia/go-simplepeer v0.0.0-20240620102623-3185549c6fa8 h1:8H0ksE4a6YfdtAeueHEdjgG3krxIdS121majAXAVimQ=
 github.com/aicacia/go-simplepeer v0.0.0-20240620102623-3185549c6fa8/go.mod h1:FTQrEH1mMtKEpMruFTp3U517cXXuwFgwuGTSn9gKNB4=
@@ -13,6 +15,8 @@ github.com/aicacia/go-simplepeer v0.0.0-20240622114758-e110b955a040 h1:Oq7JTG+YJ
 github.com/aicacia/go-simplepeer v0.0.0-20240622114758-e110b955a040/go.mod h1:FTQrEH1mMtKEpMruFTp3U517cXXuwFgwuGTSn9gKNB4=
 github.com/aicacia/go-simplepeer v0.0.0-20240622115644-3962349485bc h1:1jz1LpWnqFGueY54nJVqS9DHEkxXqrkEqnktcRAkinc=
 github.com/aicacia/go-simplepeer v0.0.0-20240622115644-3962349485bc/go.mod h1:FTQrEH1mMtKEpMruFTp3U517cXXuwFgwuGTSn9gKNB4=
+github.com/aicacia/go-simplepeer v0.0.0-20240626232112-969c49ca26c6 h1:LfHEAKGVnAQRoPEAGlTpufBlnms4OxKPgTE4/URKoVo=
+github.com/aicacia/go-simplepeer v0.0.0-20240626232112-969c49ca26c6/go.mod h1:D8yhkNWPBygpvAuvcfgnwYY/CqXgok6/S/fdJ7bRjRI=
 github.com/fsnotify/fsnotify v1.4.7/go.mod h1:jwhsz4b93w/PPRr/qN1Yymfu8t87LnFCMoQvtojpjFo=
 github.com/fsnotify/fsnotify v1.4.9 h1:hsms1Qyu0jgnwNXIxa+/V/PDsU6CfLf6CNO8H7IWoS4=
 github.com/fsnotify/fsnotify v1.4.9/go.mod h1:znqG4EE+3YCdAaPaxE2ZRY/06pZUdp0tY4IgpuI1SZQ=
@@ -60,6 +64,8 @@ github.com/pion/dtls/v2 v2.2.11 h1:9U/dpCYl1ySttROPWJgqWKEylUdT0fXp/xst6JwY5Ks=
 github.com/pion/dtls/v2 v2.2.11/go.mod h1:d9SYc9fch0CqK90mRk1dC7AkzzpwJj6u2GU3u+9pqFE=
 github.com/pion/webrtc/v4 v4.0.0-beta.20 h1:dt1th4CqqKV2APgPsapaskZuOKKvbYsNpgmgi8D6014=
 github.com/pion/webrtc/v4 v4.0.0-beta.20/go.mod h1:tBa/6GmW34fT7UURDdj7kwJlAW9NLEkeHKP1jAonhXY=
+github.com/pion/webrtc/v4 v4.0.0-beta.21 h1:am2ZwmEWCRzAqNmMd4jmALHzookYQdgPs5uXOIHESVY=
+github.com/pion/webrtc/v4 v4.0.0-beta.21/go.mod h1:tBa/6GmW34fT7UURDdj7kwJlAW9NLEkeHKP1jAonhXY=
 github.com/sclevine/agouti v3.0.0+incompatible h1:8IBJS6PWz3uTlMP3YBIR5f+KAldcGuOeFkFbUWfBgK4=
 github.com/sclevine/agouti v3.0.0+incompatible/go.mod h1:b4WX9W9L1sfQKXeJf1mUTLZKJ48R1S7H23Ji7oFO5Bw=
 github.com/stretchr/objx v0.5.2 h1:xuMeJ0Sdp5ZMRXx/aWO6RZxdr3beISkG5/G/aIRr3pY=
