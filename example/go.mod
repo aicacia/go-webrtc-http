@@ -3,7 +3,7 @@ module github.com/aicacia/go-webrtc-http/example
 go 1.20
 
 require (
-	github.com/aicacia/go-simplepeer v0.0.0-20240626232112-969c49ca26c6
+	github.com/aicacia/go-simplepeer v0.0.0-20240629163310-a041853deeab
 	github.com/aicacia/go-webrtc-http v0.0.0-20240622131615-d40e6774b768
 	github.com/gorilla/websocket v1.5.1
 	github.com/joho/godotenv v1.5.1
