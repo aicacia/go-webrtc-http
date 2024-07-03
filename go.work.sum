@@ -1,3 +1,5 @@
+github.com/aicacia/go-cslice v0.0.0-20240630135950-7315620337dd h1:vLr0GBzsXsdOOGTcG+lSPrYFncCkpkO57mqpoLWS1Yw=
+github.com/aicacia/go-cslice v0.0.0-20240630135950-7315620337dd/go.mod h1:rH/0o6RePUY2fzaaDvqfceMe+61GcVc9EN/RorXAOds=
 github.com/aicacia/go-result-and-option v0.0.0-20231005120116-a72cc9cee3d4/go.mod h1:YdQYcAxqFZ4fRnYWqGEvG5J+AT0Cba1oPDtunZOSazs=
 github.com/aicacia/go-simplepeer v0.0.0-20240620102623-3185549c6fa8 h1:8H0ksE4a6YfdtAeueHEdjgG3krxIdS121majAXAVimQ=
 github.com/aicacia/go-simplepeer v0.0.0-20240620102623-3185549c6fa8/go.mod h1:FTQrEH1mMtKEpMruFTp3U517cXXuwFgwuGTSn9gKNB4=
@@ -15,6 +17,8 @@ github.com/aicacia/go-simplepeer v0.0.0-20240622115644-3962349485bc h1:1jz1LpWnq
 github.com/aicacia/go-simplepeer v0.0.0-20240622115644-3962349485bc/go.mod h1:FTQrEH1mMtKEpMruFTp3U517cXXuwFgwuGTSn9gKNB4=
 github.com/aicacia/go-simplepeer v0.0.0-20240629163310-a041853deeab h1:CRw7Q+C3eJLw5R3nvaxcNZLv954hHy0asmGBgEJHy0w=
 github.com/aicacia/go-simplepeer v0.0.0-20240629163310-a041853deeab/go.mod h1:M+cQnny3n95QW8WrB0flCrtJhZPPvDfRXy/YTNXm3GE=
+github.com/aicacia/go-simplepeer v0.0.0-20240703215025-0d863b355072 h1:JpqBR7aP0Zalgpcox3RAwQB6w3c+linnlV8+d/HVEfU=
+github.com/aicacia/go-simplepeer v0.0.0-20240703215025-0d863b355072/go.mod h1:iCBwKDzdvqHiPyA192544h5Ba5bNVbku0PvEfjr8esM=
 github.com/fsnotify/fsnotify v1.4.7/go.mod h1:jwhsz4b93w/PPRr/qN1Yymfu8t87LnFCMoQvtojpjFo=
 github.com/fsnotify/fsnotify v1.4.9 h1:hsms1Qyu0jgnwNXIxa+/V/PDsU6CfLf6CNO8H7IWoS4=
 github.com/fsnotify/fsnotify v1.4.9/go.mod h1:znqG4EE+3YCdAaPaxE2ZRY/06pZUdp0tY4IgpuI1SZQ=
