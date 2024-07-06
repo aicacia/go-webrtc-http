@@ -10,12 +10,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sync"
 
-	"github.com/aicacia/go-simplepeer"
-	webrtcHttp "github.com/aicacia/go-webrtc-http"
-	"github.com/gorilla/websocket"
+	"github.com/aicacia/go-peer"
+	"github.com/aicacia/go-webrtchttp"
 	"github.com/pion/webrtc/v4"
+	"golang.org/x/net/websocket"
 )
 
 var (
@@ -46,7 +45,7 @@ func InitClient() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf(P2P_WS_URL+"/client/websocket?token=%s&payload=%s", url.QueryEscape(token), url.QueryEscape(string(payloadBytes))), nil)
+	conn, err := websocket.Dial(fmt.Sprintf(P2P_WS_URL+"/client/websocket?token=%s&payload=%s", url.QueryEscape(token), url.QueryEscape(string(payloadBytes))), "", P2P_WS_URL)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -55,10 +54,10 @@ func InitClient() {
 
 	peerConnect := make(chan struct{}, 1)
 	peerClose := make(chan struct{}, 1)
-	peer := simplepeer.NewPeer(simplepeer.PeerOptions{
+	p := peer.NewPeer(peer.PeerOptions{
 		Config: &config,
 		OnSignal: func(message map[string]interface{}) error {
-			return conn.WriteJSON(message)
+			return websocket.JSON.Send(conn, message)
 		},
 		OnConnect: func() {
 			peerConnect <- struct{}{}
@@ -67,25 +66,38 @@ func InitClient() {
 			peerClose <- struct{}{}
 		},
 	})
-	err = peer.Init()
+	err = p.Init()
 	if err != nil {
 		log.Println(err)
 	}
-	reader := createJSONReader[map[string]interface{}](conn)
+	receiver := make(chan map[string]interface{})
+	go func() {
+		defer recover()
+		for {
+			var msg map[string]interface{}
+			if err := websocket.JSON.Receive(conn, &msg); err != nil {
+				break
+			} else {
+				receiver <- msg
+			}
+		}
+	}()
 ReadLoop:
 	for {
 		select {
 		case <-peerConnect:
+			close(receiver)
 			break ReadLoop
 		case <-peerClose:
 			log.Fatal("connection closed")
+			close(receiver)
 			break ReadLoop
-		case msg, ok := <-reader:
+		case msg, ok := <-receiver:
 			if !ok {
 				log.Fatal("connection closed")
 				break
 			}
-			err := peer.Signal(msg)
+			err := p.Signal(msg)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -93,7 +105,7 @@ ReadLoop:
 	}
 
 	client := &http.Client{
-		Transport: webrtcHttp.NewRoundTripper(peer.Channel()),
+		Transport: webrtchttp.NewRoundTripper(p.Channel()),
 	}
 	resp, err := client.Post("/test", "text/plain", bytes.NewBufferString("Hello, world!"))
 	if err != nil {
@@ -109,7 +121,7 @@ ReadLoop:
 		}
 	}
 	log.Printf("response: %s", string(bytes))
-	err = peer.Close()
+	err = p.Close()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -124,48 +136,36 @@ func InitServer() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	var connRW sync.RWMutex
-	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf(P2P_WS_URL+"/server/websocket?token=%s", url.QueryEscape(token)), nil)
+
+	conn, err := websocket.Dial(fmt.Sprintf(P2P_WS_URL+"/server/websocket?token=%s", url.QueryEscape(token)), "", P2P_WS_URL)
 	if err != nil {
 		log.Fatal(err)
 	}
-	peers := make(map[string]*simplepeer.Peer)
-	servers := make(map[string]*webrtcHttp.WebRTCServerST)
+	peers := make(map[string]*peer.Peer)
+	servers := make(map[string]*webrtchttp.WebRTCServerST)
 	log.Printf("listening for peers")
 	for {
 		var msg map[string]interface{}
-		connRW.RLock()
-		err := conn.ReadJSON(&msg)
-		connRW.RUnlock()
+		err := websocket.JSON.Receive(conn, &msg)
 		if err != nil {
-			log.Println(err)
-			token, err := authenticate("server")
-			if err != nil {
-				log.Fatal(err)
-			}
-			conn, _, err = websocket.DefaultDialer.Dial(fmt.Sprintf(P2P_WS_URL+"/server/websocket?token=%s", url.QueryEscape(token)), nil)
-			if err != nil {
-				log.Fatal(err)
-			}
-			continue
+			log.Fatal(err)
 		}
 		switch msg["type"].(string) {
 		case "join":
 			from := msg["from"].(string)
 			log.Printf("%s: join %v", from, msg["payload"])
-			var peer *simplepeer.Peer
-			peer = simplepeer.NewPeer(simplepeer.PeerOptions{
+			var p *peer.Peer
+			p = peer.NewPeer(peer.PeerOptions{
 				Config: &config,
 				OnSignal: func(message map[string]interface{}) error {
-					connRW.Lock()
-					defer connRW.Unlock()
-					return conn.WriteJSON(map[string]interface{}{
+					msg := map[string]interface{}{
 						"to":      from,
 						"payload": message,
-					})
+					}
+					return websocket.JSON.Send(conn, msg)
 				},
 				OnConnect: func() {
-					servers[from] = webrtcHttp.NewServer(peer.Channel(), func(w http.ResponseWriter, r *http.Request) {
+					servers[from] = webrtchttp.NewServer(p.Channel(), func(w http.ResponseWriter, r *http.Request) {
 						for key, values := range r.Header {
 							for _, value := range values {
 								w.Header().Add(key, value)
@@ -182,7 +182,7 @@ func InitServer() {
 					delete(servers, from)
 				},
 			})
-			peers[from] = peer
+			peers[from] = p
 		case "leave":
 			log.Printf("%s: left", msg["from"])
 		case "message":
@@ -200,21 +200,6 @@ func InitServer() {
 			}
 		}
 	}
-}
-
-func createJSONReader[T any](c *websocket.Conn) chan T {
-	out := make(chan T)
-	go func() {
-		defer recover()
-		for {
-			var v T
-			if err := c.ReadJSON(&v); err != nil {
-				return
-			}
-			out <- v
-		}
-	}()
-	return out
 }
 
 func authenticate(kind string) (string, error) {

@@ -1,3 +1,3 @@
-# webrtc-http
+# webrtchttp
 
 http over webrtc server/client

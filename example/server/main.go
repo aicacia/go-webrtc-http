@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	example "github.com/aicacia/go-webrtc-http/example"
+	example "github.com/aicacia/go-webrtchttp/example"
 	"github.com/joho/godotenv"
 )
 
