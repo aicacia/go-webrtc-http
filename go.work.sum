@@ -4,6 +4,8 @@ github.com/aicacia/go-cslice v0.0.0-20240630135950-7315620337dd h1:vLr0GBzsXsdOO
 github.com/aicacia/go-cslice v0.0.0-20240630135950-7315620337dd/go.mod h1:rH/0o6RePUY2fzaaDvqfceMe+61GcVc9EN/RorXAOds=
 github.com/aicacia/go-peer v0.0.0-20240706104307-dae0798710ba h1:WFKbfe3BbfdrXpLuUyN3qJvDBWgamC2W0EDTJsQ2q7I=
 github.com/aicacia/go-peer v0.0.0-20240706104307-dae0798710ba/go.mod h1:NFmtB4+2ZcjNG4yA0TXSKulKaGPAge69mCqjMU1PJ+g=
+github.com/aicacia/go-peer v0.0.0-20240706195828-809446e5bdee h1:slhw/6ND1hWFKZnYZkN76ni19kIIJ7Th1ikw54Lb5FM=
+github.com/aicacia/go-peer v0.0.0-20240706195828-809446e5bdee/go.mod h1:NFmtB4+2ZcjNG4yA0TXSKulKaGPAge69mCqjMU1PJ+g=
 github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
