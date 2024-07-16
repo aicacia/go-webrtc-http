@@ -1,12 +1,13 @@
 package webrtchttp
 
 import (
+	"bufio"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	http "net/http"
-	"net/url"
 
 	"github.com/aicacia/go-cmap"
 	webrtc "github.com/pion/webrtc/v4"
@@ -16,201 +17,165 @@ type WebRTCServerST struct {
 	channel *webrtc.DataChannel
 }
 
-type webrtcServerConnectionST struct {
-	version     string
-	readHeaders bool
-	writer      io.WriteCloser
-	request     *http.Request
-}
+func NewServer(channel *webrtc.DataChannel, handler http.HandlerFunc) *WebRTCServerST {
+	connections := cmap.New[uint32, *webrtcServerConnectionST]()
 
-func createWebRTCServerConnection(method, path, version string) (*webrtcServerConnectionST, error) {
-	url, err := url.Parse("webrtc-http:" + path)
-	if err != nil {
-		return nil, err
-	}
-	proto, major, minor, err := parseVersion(version)
-	if err != nil {
-		return nil, err
-	}
-	pr, pw := io.Pipe()
-	return &webrtcServerConnectionST{
-		version:     version,
-		readHeaders: false,
-		writer:      pw,
-		request: &http.Request{
-			Proto:      proto,
-			ProtoMajor: major,
-			ProtoMinor: minor,
-			Method:     method,
-			URL:        url,
-			Body:       pr,
-			RequestURI: url.RequestURI(),
-			Close:      false,
-			Header:     http.Header{},
-		},
-	}, nil
-}
-
-type webRTCServerResponseST struct {
-	connectionIdBytes []byte
-	channel           *webrtc.DataChannel
-	closed            bool
-	headersWritten    bool
-	statusCodeWritten bool
-	version           string
-	statusCode        int
-	headers           http.Header
-}
-
-func (r *webRTCServerResponseST) Header() http.Header {
-	return r.headers
-}
-
-func (r *webRTCServerResponseST) Write(bytes []byte) (int, error) {
-	r.writeHeaders()
-	maxMessageSize := int(r.channel.Transport().GetCapabilities().MaxMessageSize)
+	maxMessageSize := int(channel.Transport().GetCapabilities().MaxMessageSize)
 	if maxMessageSize <= 4 {
-		maxMessageSize = 16384
+		maxMessageSize = defaultMaxMessageSize
 	}
 	// save room for id
 	maxMessageSize -= 4
-	written := 0
-	for len(bytes) > 0 {
-		bytesCount := len(bytes)
-		if bytesCount > maxMessageSize {
-			bytesCount = maxMessageSize
-		}
-		err := r.channel.Send(encodeLineBytes(r.connectionIdBytes, bytes[:bytesCount]))
-		if err != nil {
-			return written, err
-		}
-		written += bytesCount
-		bytes = bytes[bytesCount:]
-	}
-	return written, nil
-}
-
-func (r *webRTCServerResponseST) WriteHeader(statusCode int) {
-	r.statusCode = statusCode
-	r.headers.Set("Status", http.StatusText(statusCode))
-}
-
-func (r *webRTCServerResponseST) writeStatus() error {
-	if r.statusCodeWritten {
-		return nil
-	}
-	r.statusCodeWritten = true
-	return r.channel.Send(encodeLine(r.connectionIdBytes, fmt.Sprintf("%s %d %s", r.version, r.statusCode, statusCodeToStatusText(r.statusCode))))
-}
-
-func (r *webRTCServerResponseST) writeHeaders() error {
-	if r.headersWritten {
-		return nil
-	}
-	err := r.writeStatus()
-	if err != nil {
-		return err
-	}
-	r.headersWritten = true
-	for k, v := range r.headers {
-		for _, value := range v {
-			err := r.channel.Send(encodeLine(r.connectionIdBytes, fmt.Sprintf("%s: %s", k, value)))
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return r.channel.Send(encodeLineBytes(r.connectionIdBytes, rn))
-}
-
-func (r *webRTCServerResponseST) Close() error {
-	if r.closed {
-		return nil
-	}
-	r.closed = true
-	err := r.writeHeaders()
-	if err != nil {
-		return err
-	}
-	return r.channel.Send(encodeLineBytes(r.connectionIdBytes, rn))
-}
-
-func NewServer(channel *webrtc.DataChannel, handler http.HandlerFunc) *WebRTCServerST {
-	connections := cmap.New[uint32, *webrtcServerConnectionST]()
 
 	server := &WebRTCServerST{
 		channel: channel,
 	}
 
-	handle := func(connectionId uint32, connection *webrtcServerConnectionST) {
+	handleConnection := func(connection *webrtcServerConnectionST) {
+		defer func() {
+			connections.Delete(connection.id)
+			connection.Close()
+		}()
 		connectionIdBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(connectionIdBytes, connectionId)
-		response := &webRTCServerResponseST{
-			channel:           channel,
-			version:           connection.version,
-			connectionIdBytes: connectionIdBytes,
-			statusCode:        200,
-			headers:           http.Header{},
-		}
-		handler.ServeHTTP(response, connection.request)
-		err := response.Close()
+		binary.BigEndian.PutUint32(connectionIdBytes, connection.id)
+		request, err := http.ReadRequest(bufio.NewReader(connection.reader))
 		if err != nil {
-			log.Printf("Error closing response: %v", err)
+			slog.Error("Error reading request", "error", err)
+			return
 		}
+		response := newWebRTCServerResponseST(channel, connection.id, maxMessageSize, request)
+		defer response.close()
+		handler.ServeHTTP(response, request)
 	}
 
-	onRequestLine := func(connectionId uint32, line []byte) error {
-		if connection, ok := connections.Get(connectionId); !ok {
-			parts := reSpaces.Split(string(line), -1)
-			if len(parts) == 3 {
-				method := parts[0]
-				path := parts[1]
-				version := parts[2]
-				connection, err := createWebRTCServerConnection(method, path, version)
-				if err != nil {
-					return err
-				}
-				connections.Set(connectionId, connection)
-			}
-		} else {
-			if !connection.readHeaders {
-				if line[0] == r && line[1] == n {
-					connection.readHeaders = true
-					// TODO: use a context here
-					go handle(connectionId, connection)
-				} else {
-					header := reHeader.Split(string(line), 2)
-					if len(header) == 2 {
-						key := header[0]
-						value := header[1]
-						connection.request.Header.Add(key, value)
-					}
-				}
-			} else {
-				if line[0] == r && line[1] == n {
-					connection.writer.Close()
-					connections.Delete(connectionId)
-				} else {
-					written, err := connection.writer.Write(line)
-					connection.request.ContentLength += int64(written)
-					if err != nil {
-						return err
-					}
-				}
-			}
+	onData := func(connectionId uint32, data []byte) error {
+		connection, ok := connections.Get(connectionId)
+		if !ok {
+			connection = newWebRTCServerConnection(connectionId)
+			go handleConnection(connection)
+			connections.Set(connectionId, connection)
 		}
-		return nil
+		_, err := connection.writer.Write(data)
+		return err
 	}
 
 	onMessage := func(msg webrtc.DataChannelMessage) {
 		connectionId := binary.BigEndian.Uint32(msg.Data[0:4])
-		err := onRequestLine(connectionId, msg.Data[4:])
-		if err != nil {
-			log.Printf("error handling message: %v\n", err)
+		if err := onData(connectionId, msg.Data[4:]); err != nil {
+			slog.Error("error handling message", "error", err)
 		}
 	}
 
 	channel.OnMessage(onMessage)
 
 	return server
+}
+
+func (server *WebRTCServerST) Close() error {
+	server.channel.OnMessage(nil)
+	return nil
+}
+
+type webrtcServerConnectionST struct {
+	id     uint32
+	reader io.ReadCloser
+	writer io.WriteCloser
+}
+
+func (connection *webrtcServerConnectionST) Close() {
+	var errs []error
+	if err := connection.reader.Close(); err != nil {
+		errs = append(errs, err)
+	}
+	if err := connection.writer.Close(); err != nil {
+		errs = append(errs, err)
+	}
+	if err := errors.Join(errs...); err != nil {
+		slog.Error("Error closing connection", "error", err)
+	}
+}
+
+func newWebRTCServerConnection(connectionId uint32) *webrtcServerConnectionST {
+	reader, writer := io.Pipe()
+	connection := &webrtcServerConnectionST{
+		connectionId,
+		reader,
+		writer,
+	}
+	return connection
+}
+
+type webRTCServerResponseST struct {
+	channel           *webrtc.DataChannel
+	headersWritten    bool
+	statusCodeWritten bool
+	proto             string
+	statusCode        int
+	writer            *bufio.Writer
+	headers           http.Header
+}
+
+func newWebRTCServerResponseST(channel *webrtc.DataChannel, connectionId uint32, maxMessageSize int, request *http.Request) *webRTCServerResponseST {
+	idBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(idBytes, connectionId)
+	return &webRTCServerResponseST{
+		channel:    channel,
+		proto:      request.Proto,
+		statusCode: 200,
+		writer:     bufio.NewWriter(newChannelWriter(idBytes, channel, maxMessageSize)),
+		headers:    http.Header{},
+	}
+}
+
+func (response *webRTCServerResponseST) Header() http.Header {
+	return response.headers
+}
+
+func (response *webRTCServerResponseST) Write(bytes []byte) (int, error) {
+	if err := response.writeHeaders(); err != nil {
+		return 0, err
+	}
+	return response.writer.Write(bytes)
+}
+
+func (response *webRTCServerResponseST) WriteHeader(statusCode int) {
+	response.statusCode = statusCode
+	response.headers.Set("Status", http.StatusText(statusCode))
+}
+
+func (response *webRTCServerResponseST) writeStatus() error {
+	if response.statusCodeWritten {
+		return nil
+	}
+	response.statusCodeWritten = true
+	_, err := response.writer.Write([]byte(fmt.Sprintf("%s %d %s\r\n", response.proto, response.statusCode, statusCodeToStatusText(response.statusCode))))
+	return err
+}
+
+func (response *webRTCServerResponseST) writeHeaders() error {
+	if response.headersWritten {
+		return nil
+	}
+	if err := response.writeStatus(); err != nil {
+		return err
+	}
+	response.headersWritten = true
+	for k, v := range response.headers {
+		for _, value := range v {
+			if _, err := response.writer.Write([]byte(fmt.Sprintf("%s: %s\r\n", k, value))); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := response.writer.Write([]byte("\r\n"))
+	return err
+}
+
+func (response *webRTCServerResponseST) close() {
+	if err := response.writeHeaders(); err != nil {
+		slog.Error("error writing headers", "error", err)
+	}
+	if err := response.writer.Flush(); err != nil {
+		slog.Error("error flushing writer", "error", err)
+	}
 }

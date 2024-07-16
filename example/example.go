@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -37,42 +38,48 @@ func InitClient() {
 
 	token, err := authenticate("client")
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("error authenticating", "error", err)
+		os.Exit(1)
 	}
 	payloadBytes, err := json.Marshal(map[string]interface{}{
 		"name": "test",
 	})
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("error handling payload", "error", err)
+		os.Exit(1)
 	}
 	conn, err := websocket.Dial(fmt.Sprintf(P2P_WS_URL+"/client/websocket?token=%s&payload=%s", url.QueryEscape(token), url.QueryEscape(string(payloadBytes))), "", P2P_WS_URL)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("error connecting to websocket", "error", err)
+		os.Exit(1)
 	}
 	defer conn.Close()
 	log.Printf("connecting to server")
 
-	peerConnect := make(chan struct{}, 1)
-	peerClose := make(chan struct{}, 1)
+	peerConnect := make(chan bool, 1)
+	peerClose := make(chan bool, 1)
+	ordered := true
 	p := peer.NewPeer(peer.PeerOptions{
 		Config: &config,
+		ChannelConfig: &webrtc.DataChannelInit{
+			Ordered: &ordered,
+		},
 		OnSignal: func(message map[string]interface{}) error {
 			return websocket.JSON.Send(conn, message)
 		},
 		OnConnect: func() {
-			peerConnect <- struct{}{}
+			peerConnect <- true
 		},
 		OnClose: func() {
-			peerClose <- struct{}{}
+			peerClose <- true
 		},
 	})
-	err = p.Init()
-	if err != nil {
-		log.Println(err)
+	if err = p.Init(); err != nil {
+		slog.Error("error initializing peer", "error", err)
+		os.Exit(1)
 	}
 	receiver := make(chan map[string]interface{})
 	go func() {
-		defer recover()
 		for {
 			var msg map[string]interface{}
 			if err := websocket.JSON.Receive(conn, &msg); err != nil {
@@ -86,20 +93,19 @@ ReadLoop:
 	for {
 		select {
 		case <-peerConnect:
-			close(receiver)
 			break ReadLoop
 		case <-peerClose:
-			log.Fatal("connection closed")
-			close(receiver)
-			break ReadLoop
+			slog.Error("peer closed", "error", err)
+			os.Exit(1)
 		case msg, ok := <-receiver:
 			if !ok {
-				log.Fatal("connection closed")
-				break
+				slog.Error("websocket closed", "error", err)
+				os.Exit(1)
 			}
 			err := p.Signal(msg)
 			if err != nil {
-				log.Fatal(err)
+				slog.Error("error signaling peer", "error", err)
+				os.Exit(1)
 			}
 		}
 	}
@@ -109,21 +115,24 @@ ReadLoop:
 	}
 	resp, err := client.Post("/test", "text/plain", bytes.NewBufferString("Hello, world!"))
 	if err != nil {
-		log.Fatalf("error in http call: %v", err)
+		slog.Error("error in http call", "error", err)
+		os.Exit(1)
 	}
+	defer resp.Body.Close()
 	bytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("error reading body: %v", err)
+		slog.Error("error reading body", "error", err)
+		os.Exit(1)
 	}
 	for key, values := range resp.Header {
 		for _, value := range values {
-			log.Printf("%s: %s", key, value)
+			slog.Info("headers", key, value)
 		}
 	}
-	log.Printf("response: %s", string(bytes))
-	err = p.Close()
-	if err != nil {
-		log.Fatal(err)
+	slog.Info("response", "body", string(bytes))
+	if err := p.Close(); err != nil {
+		slog.Error("error closing peer", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -139,7 +148,8 @@ func InitServer() {
 
 	conn, err := websocket.Dial(fmt.Sprintf(P2P_WS_URL+"/server/websocket?token=%s", url.QueryEscape(token)), "", P2P_WS_URL)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("error connecting to websocket", "error", err)
+		os.Exit(1)
 	}
 	peers := make(map[string]*peer.Peer)
 	servers := make(map[string]*webrtchttp.WebRTCServerST)
@@ -148,15 +158,23 @@ func InitServer() {
 		var msg map[string]interface{}
 		err := websocket.JSON.Receive(conn, &msg)
 		if err != nil {
-			log.Fatal(err)
+			if err == io.EOF {
+				continue
+			}
+			slog.Error("error receiving message", "error", err)
+			os.Exit(1)
 		}
 		switch msg["type"].(string) {
 		case "join":
 			from := msg["from"].(string)
-			log.Printf("%s: join %v", from, msg["payload"])
+			slog.Info("join", "peer", from, "payload", msg["payload"])
 			var p *peer.Peer
+			ordered := true
 			p = peer.NewPeer(peer.PeerOptions{
 				Config: &config,
+				ChannelConfig: &webrtc.DataChannelInit{
+					Ordered: &ordered,
+				},
 				OnSignal: func(message map[string]interface{}) error {
 					msg := map[string]interface{}{
 						"to":      from,
@@ -171,9 +189,8 @@ func InitServer() {
 								w.Header().Add(key, value)
 							}
 						}
-						_, err := io.Copy(w, r.Body)
-						if err != nil {
-							fmt.Println(err)
+						if _, err := io.Copy(w, r.Body); err != nil {
+							slog.Error("error copying body", "error", err)
 						}
 					})
 				},
@@ -184,19 +201,18 @@ func InitServer() {
 			})
 			peers[from] = p
 		case "leave":
-			log.Printf("%s: left", msg["from"])
+			slog.Info("left", "peer", msg["from"])
 		case "message":
 			if peer, ok := peers[msg["from"].(string)]; ok {
 				if payload, ok := msg["payload"].(map[string]interface{}); ok {
-					err := peer.Signal(payload)
-					if err != nil {
-						log.Println(err)
+					if err := peer.Signal(payload); err != nil {
+						slog.Error("error signaling peer", "error", err)
 					}
 				} else {
-					log.Printf("%s: invalid payload", msg["from"])
+					slog.Error("invalid payload", "peer", msg["from"])
 				}
 			} else {
-				log.Printf("%s: peer not found", msg["from"])
+				slog.Error("peer not found", "peer", msg["from"])
 			}
 		}
 	}
