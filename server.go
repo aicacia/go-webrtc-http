@@ -148,7 +148,7 @@ func (response *webRTCServerResponseST) writeStatus() error {
 		return nil
 	}
 	response.statusCodeWritten = true
-	_, err := response.writer.Write([]byte(fmt.Sprintf("%s %d %s\r\n", response.proto, response.statusCode, statusCodeToStatusText(response.statusCode))))
+	_, err := response.writer.Write([]byte(fmt.Sprintf("%s %d %s\r\n", response.proto, response.statusCode, http.StatusText(response.statusCode))))
 	return err
 }
 

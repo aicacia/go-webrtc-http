@@ -129,6 +129,7 @@ ReadLoop:
 			slog.Info("headers", key, value)
 		}
 	}
+	slog.Info("status", "status", resp.StatusCode)
 	slog.Info("response", "body", string(bytes))
 	if err := p.Close(); err != nil {
 		slog.Error("error closing peer", "error", err)
@@ -189,6 +190,7 @@ func InitServer() {
 								w.Header().Add(key, value)
 							}
 						}
+						w.WriteHeader(http.StatusAccepted)
 						if _, err := io.Copy(w, r.Body); err != nil {
 							slog.Error("error copying body", "error", err)
 						}
