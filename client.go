@@ -23,7 +23,7 @@ type WebRTCRoundTripperST struct {
 func NewRoundTripper(channel *webrtc.DataChannel) *WebRTCRoundTripperST {
 	maxMessageSize := int(channel.Transport().GetCapabilities().MaxMessageSize)
 	if maxMessageSize <= 4 {
-		maxMessageSize = 16384
+		maxMessageSize = defaultMaxMessageSize
 	}
 	// save room for id
 	maxMessageSize -= 4
